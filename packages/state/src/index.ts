@@ -52,3 +52,13 @@ export {
   GROUP_MAX_MEMBERS,
   AgentStore,
 } from "./agent-store.js";
+export {
+  type BcsResource,
+  type BcsBackend,
+  type AgentStoreSyncOptions,
+  BcsConflictError,
+  BcsLockHeldError,
+  AgentStoreSync,
+  createInMemoryBcsBackend,
+} from "./agent-store-sync.js";
+

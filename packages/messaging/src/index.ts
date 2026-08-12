@@ -57,3 +57,33 @@ export {
   type SubagentRuntimeHost,
   SubagentRuntime,
 } from "./subagent-runtime.js";
+export {
+  type TurnRequest,
+  type TurnResult,
+  type CrossUserTransport,
+  type CrossUserRelayOptions,
+  REMOTE_TURN_MAX_TEXTS,
+  TURN_BUDGET_WINDOW_MS,
+  TURN_BUDGET_MAX_PER_WINDOW,
+  UNREACHABLE_BACKOFF_MS,
+  BudgetExceededError,
+  UnreachableBackoffError,
+  CrossUserRelay,
+} from "./cross-user-relay.js";
+export {
+  type CloudAgentLaunchRequest,
+  type CloudAgentHandle,
+  type CloudAgentStatus,
+  type CloudAgentBackend,
+  type CloudAgentBridgeOptions,
+  CLOUD_POLL_INTERVAL_MS,
+  CLOUD_RPC_TIMEOUT_MS,
+  CLOUD_RUNTIME_CAP_MS,
+  CLOUD_RATE_LIMIT_BASE_MS,
+  CLOUD_RATE_LIMIT_JITTER,
+  CloudRpcTimeoutError,
+  CloudRuntimeCapError,
+  CloudAgentBridge,
+  createMockCloudBackend,
+} from "./cloud-agent-bridge.js";
+

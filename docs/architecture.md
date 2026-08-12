@@ -1,167 +1,256 @@
-# Open-Grokbot 架构文档
+# Architecture
 
-本框架是对现代桌面 agent 平台（Grok Bot 类）多 agent 系统的全量架构还原。本文档描述各层职责、进程拓扑、数据流与消息路径。
+English documentation for Open-Grokbot — a clean-room re-implementation of a
+modern desktop agent platform's multi-agent communication and coordination
+architecture.
 
-## 1. 分层
+## 1. Process Topology
 
-```
-┌────────────────────────────────────────────────────────────┐
-│ 客户端层 (apps/demo)                                         │
-│  sendPrompt / broadcast / group / transcript 视图            │
-└──────────────────────────┬─────────────────────────────────┘
-                           │ 帧协议 (lifecycle/request/reply/event)
-┌──────────────────────────▼─────────────────────────────────┐
-│ 传输层 (packages/transport)                                  │
-│  PortServer/PortClient —— 会话、方向守卫、协议违约结算         │
-│  GatewaySseClient —— 命令 POST + SSE 事件流 + 退避重连        │
-│  GatewaySseServer —— 命令路由、心跳、订阅过滤                 │
-│  16 事件族映射 (transcript/agents/subagents/workflows/…)     │
-└──────────────────────────┬─────────────────────────────────┘
-                           │
-┌──────────────────────────▼─────────────────────────────────┐
-│ 调度内核 (packages/core)                                     │
-│  RunScheduler —— 每 agent 排他队列，user>agent>background     │
-│  watchdog(120s)+grace(30s) —— wedged run 逃逸为 zombie       │
-│  RunLifecycle —— run 窗口、ack 义务                           │
-│  策略族：retry(退避)/deadline/idle-watchdog/polling           │
-└──────────────────────────┬─────────────────────────────────┘
-                           │
-┌──────────────────────────▼─────────────────────────────────┐
-│ 消息层 (packages/messaging)                                  │
-│  AgentToAgentMessaging —— A2A 队列+唤醒+priority steer        │
-│  GroupChatOrchestrator —— 有界轮转群聊                        │
-│  BroadcastMessaging —— 单向扇出                              │
-│  SubagentRuntime —— lineage/steer/abort                      │
-└──────────────────────────┬─────────────────────────────────┘
-                           │
-┌──────────────────────────▼─────────────────────────────────┐
-│ 状态层 (packages/state)                                      │
-│  TranscriptStore · AcceptanceLedger · MemoryStore            │
-│  AutomationStore/Scheduler · AgentStore                      │
-└──────────────────────────┬─────────────────────────────────┘
-                           │
-┌──────────────────────────▼─────────────────────────────────┐
-│ 执行层 (packages/runner + llm)                               │
-│  AgentRunner —— 提示词组装、SendMessage 提取、interrupt       │
-│  SessionRuntime —— 组合根：持久化目录 + 调度 + 消息 + LLM      │
-│  Llm 接口 + MockLlm                                          │
-└────────────────────────────────────────────────────────────┘
-```
+The original platform splits responsibilities across OS processes: an
+Electron shell (renderer + main), a **node-agent-coordinator** utility
+process (the IPC hub), a **host** agent runtime, and a **local-exec-daemon**
+for isolated shell execution. Open-Grokbot mirrors this topology; in plain
+Node the shell is a CLI demo and the coordinator runs as a forked child.
 
-## 2. 进程拓扑（目标形态）
+```mermaid
+flowchart LR
+    subgraph Shell["Desktop shell (Electron main + renderer) / demo CLI"]
+        UI["Renderer / CLI"]
+        MAIN["Main process"]
+    end
 
-完整部署形态下（路线图），进程边界与原版一致：
+    subgraph Coord["node-agent-coordinator (child process)"]
+        C["CoordinatorCore"]
+        S1["control session"]
+        S2["data session (renderer)"]
+        S3["mainData session (main)"]
+        GW["Gateway SSE client"]
+        HV["host supervisor"]
+    end
 
-```
-Electron main ──utilityProcess──▶ node-agent-coordinator ──HTTP/SSE──▶ host
-     │                                    │                            │
-     └── 3×MessagePort (control/data/mainData)                        spawn
-                                                                      ▼
-                                                          local-exec-daemon
+    subgraph Host["Host (agent runtime)"]
+        H["orchestration: transcript · scheduler · messaging"]
+    end
+
+    subgraph Exec["local-exec-daemon"]
+        E["shell / file ops"]
+    end
+
+    UI -->|MessagePort | S2
+    MAIN -->|MessagePort | S3
+    MAIN -->|MessagePort | S1
+    S1 --- C
+    S2 --- C
+    S3 --- C
+    C -->|POST /api/&lt;method&gt;| GW
+    GW <-->|GET /events (SSE)| H
+    HV -.->|spawn / restart| Host
+    H <-->|HTTP /local-exec/*| E
 ```
 
-当前仓库以 `SessionRuntime` 在单进程内装配等价组合（`packages/runner/src/session-runtime.ts`），
-消息层与调度内核的接口（`MessagingHub`/`ExclusiveRunQueue`/`AgentSessionRegistry`）与进程形态解耦，
-迁移到多进程时无需改动消息语义。
+Carriers (mirroring the original's two boot paths):
 
-## 3. 数据流
+| Carrier | Process | Transport | Planes |
+|---|---|---|---|
+| parent-port (production) | `utilityProcess.fork` | 3 × `MessageChannel` handed off in one `handoff` message | control / data / mainData |
+| fork-ipc (tests, plain Node) | `child_process.fork` | one IPC pipe, `{channel}` envelope | control / mainData (no renderer) |
 
-### 3.1 用户消息（sendPrompt 路径）
+## 2. Layering
 
-```
-用户输入
-  → SessionRuntime.sendUserPrompt
-  → transcript 追加 user 条目（clientNonce 可选）
-  → scheduler.enqueue(lane="user")
-  → AgentRunner.run
-      → 组装：系统提示 + 记忆块 + transcript 尾部 + 用户消息
-      → llm.complete
-      → parseSendMessages 提取 SendMessage 信封
-      → transcript 追加 send-message 条目
-      → onProducedMessage 回调（UI/日志）
-```
+```mermaid
+flowchart TB
+    subgraph apps["apps/demo — CLI, composition root"]
+        D1["demo commands"]
+    end
+    subgraph coord["packages/coordinator — process hub"]
+        C1["CoordinatorCore · carriers · RPC contract · WebAuthn"]
+    end
+    subgraph transp["packages/transport — wire"]
+        T1["frames · port · sse · channels · local-exec"]
+    end
+    subgraph run["packages/runner — execution"]
+        R1["AgentRunner · SessionRuntime · GroupMemberRunner"]
+    end
+    subgraph msg["packages/messaging — coordination"]
+        M1["A2A · group · broadcast · subagent · cross-user · cloud"]
+    end
+    subgraph state["packages/state — persistence"]
+        S1["transcript · ledger · memory · automations · agent-store · BCS"]
+    end
+    subgraph core["packages/core — scheduling"]
+        K1["RunScheduler · RunLifecycle · policies · clock · event-bus"]
+    end
+    subgraph llm["packages/llm — inference"]
+        L1["Llm interface · MockLlm"]
+    end
 
-### 3.2 A2A 消息路径
-
-```
-Agent A (SendToAgent)
-  → 校验（非空/非自聊/接收者存在/非远程镜像）
-  → 群目标？→ postToGroup（房间广播，text-only）
-  → A 的 transcript 追加 toAgent 镜像
-  → pendingAgentInbound[B] 入队（priority 插队 + steer 中断 B 的非用户工作）
-  → reviveForAgentInbound(B) → 隐藏唤醒 turn（lane="agent"）
-      → B 的 transcript 追加 fromAgent 条目
-      → runAgentInboundWake：逐条处理，priority 抢占时重新排队
-      → DM 打断 → at-least-once 重驱（isRedriven 防环）
-  → B 回复 → 对称路径唤醒 A
-```
-
-### 3.3 群聊路径
-
-```
-用户消息进入群房间 / 手动触发
-  → GroupChatOrchestrator.run
-  → 每轮：resolveResponders（@提及优先，否则全员）
-  → orderRoundSpeakers（round 偏移轮转）
-  → 每成员 runGroupMemberTurn（独立会话状态 + roster/persona/peers 系统提示）
-  → 收集成员 SendMessage 产出（≤2 条/人/轮，[[pass]] 跳过）
-  → postMemberMessage → 房间 transcript + 实时广播
-  → 终止：总消息 ≤10 / 轮次 ≤3 / 全员 pass / 用户新消息 supersede
+    D1 --> C1 --> T1 --> R1
+    R1 --> M1 --> S1 --> K1
+    R1 --> L1
 ```
 
-### 3.4 广播路径
+Dependency direction is strictly downward; no layer reaches up.
 
-```
-用户 broadcastToAgents("all"|ids, message)
-  → 逐目标 scheduleBroadcast（顺序调度防 db 并发打开）
-  → 每个目标：隐藏唤醒 turn（lane="agent"），并发执行
-  → 单向：无任何 agent 路径重入广播 → 无环
-```
+## 3. Command & Event Data Flow
 
-### 3.5 事件族（SSE → 端口事件）
+```mermaid
+sequenceDiagram
+    participant UI as Renderer / CLI
+    participant PORT as PortServer (data plane)
+    participant CORE as CoordinatorCore
+    participant GW as Gateway client
+    participant HOST as Host gateway server
+    participant SCHED as RunScheduler
 
-```
-host 内部事件（transcript 追加、roster 变化、subagent 状态…）
-  → SSE channel（16 族：transcript/agents/agent-upserted/tray/workflows/
-     subagents/async-tasks/automations/mcp-servers/forever-box/
-     teach-recording/box-disk-pressure/computer-action/outline/sharing/host-settings）
-  → 协调器 eventFamilyForSseChannel 映射
-  → MessagePort event 帧 → 客户端订阅分发
-```
-
-## 4. 关键设计决策
-
-| 决策 | 理由 |
-|---|---|
-| 每 agent 排他队列 + 三 lane | 用户消息永远压过 agent 间通信，杜绝饿死；单活跃任务简化并发正确性 |
-| watchdog 逃逸为 zombie | 发送方 promise 不悬挂（durable acceptance 契约）；drain 仍等待真实结束（删除安全） |
-| clientNonce + digest 账本 | 超时/重启/重连三重场景下零双发；digest 不匹配 = 协议违约 |
-| fire-and-forget A2A | 发送方不阻塞；回复经同一路径对称唤醒，无死锁 |
-| at-least-once 重驱 | 被抢占的 A2A 批次标记 isRedriven 后重新排队，防消息丢失且防环 |
-| 群聊三重终止 + 用户 supersede | 防 agent 互刷死循环 |
-| 群目标走房间、1:1 走唤醒 | 一个 SendToAgent 工具同时寻址 agent 与 group |
-| transcript 双向标记 | 任一侧 transcript 可重建完整交换图（社交图谱/org chart） |
-
-## 5. 持久化布局
-
-```
-<rootDir>/
-├── <agentId>/
-│   ├── transcript.jsonl      # 追加式会话记录
-│   ├── memory.json           # agent 记忆
-│   ├── automations.json      # 自动化（共享或每 agent）
-│   ├── profile.json          # name/description/title
-│   ├── settings.json         # 通知/隐藏/PR 链接风格
-│   ├── group.json            # 群成员（仅群 room）
-│   └── agent.json            # id/时间戳/origin/isGroup
-└── automations.json          # 全局自动化索引
+    UI->>PORT: request{sendPrompt, clientNonce}
+    PORT->>CORE: dispatch(method, args)
+    CORE->>GW: POST /api/sendPrompt (Bearer)
+    GW->>HOST: accept + persist (durable acceptance)
+    HOST-->>GW: 200 {accepted}
+    GW-->>CORE: result
+    CORE-->>PORT: reply{ok}
+    PORT-->>UI: accepted
+    HOST->>SCHED: enqueue turn (lane=user)
+    SCHED-->>HOST: turn runs separately
+    HOST--)GW: SSE {channel: transcript, payload: appended}
+    GW--)CORE: event
+    CORE--)PORT: event{family: transcript}
+    PORT--)UI: bubble updates
 ```
 
-## 6. 演进路径（对齐原版未覆盖面）
+The acceptance reply only promises durability; the turn executes
+independently (durable-acceptance decoupling).
 
-- 协调器子进程：`transport` 的 PortServer/Client 已就绪，需 carrier（utilityProcess 三端口）与
-  bootstrap 校验、退出码契约（0/1/2）。
-- 跨用户共享房间：`messaging` 的群聊已支持 remoteMembers 数据模型，需 relay 传输层
-  （turn-request/turn-result、预算、nonce 去重）。
-- 云 agent：`runner` 已有 CloudAgent 桥接口预留，需 BackgroundComposer gRPC 客户端。
-- local-exec：`transport` 的 SSE 网关可扩展 `/local-exec/*` 端点，需 daemon 进程。
+### Event-family pipeline
+
+```
+host SSE channel ──► coordinator family map ──► port event frame ──► renderer
+        │                      │                        │
+  16 channels           16 typed families           family-tagged
+  ?channels= filter     unknown → passthrough       per-family handlers
+```
+
+The 16 families: `transcript`, `agents`, `agent-upserted`, `tray`,
+`workflows`, `subagents`, `async-tasks`, `automations`, `mcp-servers`,
+`forever-box`, `teach-recording`, `box-disk-pressure`, `computer-action`,
+`outline`, `sharing`, `host-settings`. Unknown channels pass through
+untouched so protocol evolution never breaks the pipeline.
+
+## 4. A2A Messaging Path
+
+```mermaid
+sequenceDiagram
+    participant A as Agent A (busy, lane=background)
+    participant MSG as AgentToAgentMessaging
+    participant Q as pendingAgentInbound[B]
+    participant SCHED as Scheduler (agent B)
+    participant B as Agent B
+
+    MSG->>A: sendToAgent(B, text, priority)
+    Note over MSG: validate: non-empty, not self,<br/>recipient exists, not remote mirror
+    MSG->>A: append toAgent mirror entry (both transcripts rebuild the exchange)
+    MSG->>A: addConversationPartner (social graph edge)
+    MSG->>Q: enqueue (priority → front)
+    MSG->>SCHED: reviveForAgentInbound → hidden turn (lane=agent)
+    alt B idle
+        SCHED->>B: wake, process inbound queue
+        B-->>MSG: reply via sendToAgent(A, ...) (symmetric wake)
+    else B busy with non-user work
+        MSG->>B: interrupt() (steer)
+        Note over B: preempted DM re-driven with isRedriven flag<br/>(at-least-once, no loops)
+    end
+```
+
+Fire-and-forget: the sender never blocks on a reply; replies wake the
+original sender symmetrically, so no deadlock is possible.
+
+## 5. Group Chat Orchestration
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant G as GroupChatOrchestrator
+    participant M1 as Member A
+    participant M2 as Member B
+    participant M3 as Member C
+
+    U->>G: group message "review the plan @B"
+    loop round ≤ 3, messages ≤ 10
+        G->>G: parse mentions → responders ([B] + round-robin rest)
+        G->>M2: run member turn (own session + roster/persona prompt)
+        M2-->>G: response
+        G->>M1: next speaker (round-robin offset)
+        M1-->>G: "pass" (convergence signal)
+        Note over G: whole round passed → converge
+    end
+    Note over G: caps: 3 rounds · 10 msgs · 2 msgs/member/round · 6 members
+    Note over G: user message at any time supersedes the in-flight round
+```
+
+## 6. Cross-User Shared Rooms
+
+```mermaid
+sequenceDiagram
+    participant M as Mirror box (user 2)
+    participant R as Backend relay
+    participant H as Hosted box (user 1)
+
+    M->>R: turn-request{nonce, roomId, fromAgentId, prompt}
+    Note over M: guards: 30 turns / 10 min window,<br/>10 min backoff if unreachable,<br/>nonce dedupe (replay cached result)
+    R->>H: forward turn-request
+    H->>H: run remote member turn
+    H-->>R: turn-result{nonce, texts ≤ 2}
+    R-->>M: turn-result
+    M->>M: append mirror transcript entries
+```
+
+## 7. Cloud Agent Bridge
+
+```mermaid
+sequenceDiagram
+    participant L as Local agent
+    participant B as CloudAgentBridge
+    participant C as Cloud backend (BackgroundComposer)
+
+    L->>B: launch(prompt) [60s ± 25% rate-limit jitter]
+    B->>C: launch (30s RPC timeout)
+    C-->>B: handle
+    loop every 10s until settled or 5h cap
+        B->>C: status
+        C-->>B: pending/running/done (+filesChanged, prUrl)
+    end
+    B-->>L: final status
+    L->>B: reply / cancel / rename / exportTranscript
+```
+
+## 8. State & Consistency
+
+- **Transcript**: JSONL per agent (mirroring the SQLite + in-memory dual
+  track); user/assistant/a2a/tool entries with `fromAgent`/`toAgent` markers
+  so both sides of an exchange can rebuild the full conversation graph.
+- **Acceptance ledger**: persistent nonce + input digest store; retries after
+  crash/timeout replay the stored acceptance instead of double-sending.
+- **BCS sync**: etag conditional writes, exclusive mutation lock with expiry,
+  merge-on-conflict retry — two devices editing one agent converge.
+- **Agent store**: per-agent directory (profile.json / settings.json /
+  group.json / store.db-equivalent JSON files), 50-agent cap, 6-member group
+  cap.
+
+## 9. Supervision & Recovery
+
+```mermaid
+stateDiagram-v2
+    [*] --> Running: spawn host
+    Running --> Running: healthy
+    Running --> Restarting: exit code 2 (crash)
+    Running --> [*]: exit code 0 (clean)
+    Running --> [*]: exit code 1 (protocol breach)
+    Restarting --> Running: backoff 1s→30s exponential
+```
+
+- SSE client: connect deadline 15s, stall watchdog 35s, send timeout 15s,
+  1s→10s capped backoff, infinite reconnect, re-seeded roster.
+- Scheduler watchdog: wedged runs escape after 120s + 30s grace into a
+  zombie — callers settle immediately, drain/delete wait for true stop.
+- Port protocol: any frame contract breach settles the session and the
+  coordinator kills by exit-code contract.

@@ -1,0 +1,20 @@
+{
+  "name": "@open-grokbot/coordinator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node-agent-coordinator equivalent: process supervisor, port carriers (parent-port / fork-ipc), RPC contract, event-family fan-out, WebAuthn stub.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "npm run build && node --test \"dist/test/*.test.js\""
+  },
+  "dependencies": {
+    "@open-grokbot/transport": "*",
+    "@open-grokbot/core": "*"
+  }
+}

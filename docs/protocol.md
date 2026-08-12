@@ -190,3 +190,112 @@ trigger: { type: "schedule", cron: "m h [* * *]" }
 
 - 调度器每 60s 扫描（可配）；interval 到期即触发；schedule 为 UTC 分钟/小时边界（每日）。
 - 触发 → 目标 agent 后台 lane 唤醒 turn；`recordRun` 更新 runCount/lastRunAtMs。
+
+## 10. 协调器载体契约（carrier）
+
+### parent-port（Electron utilityProcess）
+
+父进程创建 3 个 `MessageChannel`，`port2` 通过单条 handoff 消息移交：
+
+```json
+{
+  "type": "handoff",
+  "controlPort": "<MessagePort>",
+  "dataPort": "<MessagePort>",
+  "mainDataPort": "<MessagePort>"
+}
+```
+
+子进程收到 handoff 后以三个 PortServer 会话应答；任何帧违约 → 会话结算 → 进程按退出码契约终止。
+
+### fork-ipc（Node fork，测试/纯 Node 部署）
+
+单一 IPC 管道，control / mainData 用 envelope 多路复用：
+
+```json
+{ "channel": "control" | "mainData", "data": "<ServerFrame>" }
+```
+
+无 envelope 的裸帧归 control（对应原版宽松解析）。fork-ipc 无渲染进程，故无 data 平面。
+
+### 退出码契约
+
+| 码 | 语义 | 监督动作 |
+|---|---|---|
+| 0 | 干净退出 | 不重启 |
+| 1 | 协议违约（kill-by-contract） | 不重启 |
+| 2 | 崩溃 | 指数退避重启（1s 基数，30s 上限） |
+
+### RPC 方法清单（rpc-contract）
+
+data 平面：`sendPrompt`、`broadcastToAgents`、`createGroup`、`setGroupMembers`、`getSubagents`、`getAsyncTasks`、`listChannels`、`sharedRooms`、`foreverBox`、`teachRecording`。
+mainData 平面：`hostStatus`、`restartHost`。
+control 平面：`hello`、`ping`、`webauthnMakeCredential`、`webauthnGetAssertion`。
+
+## 11. 跨用户共享房间（xuser relay）
+
+```
+mirror box ── turn-request ──► backend relay ──► hosted box
+           ◄── turn-result ──                 (远程成员 turn，≤2 条文本)
+```
+
+```jsonc
+// turn-request
+{ "nonce": "uuid", "roomId": "room-1", "fromAgentId": "a1", "prompt": "..." }
+// turn-result
+{ "nonce": "uuid", "texts": ["最多两条文本消息"] }
+```
+
+防滥用常数：
+
+| 常数 | 值 |
+|---|---|
+| `REMOTE_TURN_MAX_TEXTS` | 2 |
+| `TURN_BUDGET_WINDOW_MS` | 10 min |
+| `TURN_BUDGET_MAX_PER_WINDOW` | 30 |
+| `UNREACHABLE_BACKOFF_MS` | 10 min |
+
+nonce 幂等：重复请求直接重放缓存结果（不二次执行、不消耗预算计数器的结果语义）。
+
+## 12. 云 agent 桥（BackgroundComposer 契约）
+
+方法：`launch` / `reply` / `cancel` / `rename` / `status` / `exportTranscript`。
+
+```jsonc
+// launch
+{ "localAgentId": "a1", "prompt": "fix tests", "cwd": "/repo" }
+// status
+{ "state": "pending|running|done|failed|cancelled",
+  "filesChanged": ["src/index.ts"], "prUrl": "https://..." }
+```
+
+时序常数：
+
+| 常数 | 值 |
+|---|---|
+| `CLOUD_POLL_INTERVAL_MS` | 10 s |
+| `CLOUD_RPC_TIMEOUT_MS` | 30 s（客户端 Promise.race，backend 挂死也不阻塞） |
+| `CLOUD_RUNTIME_CAP_MS` | 5 h |
+| `CLOUD_RATE_LIMIT_BASE_MS` ± `CLOUD_RATE_LIMIT_JITTER` | 60 s ± 25% |
+
+## 13. local-exec 通道
+
+| 端点 | 方法 | 语义 |
+|---|---|---|
+| `/local-exec/heartbeat` | POST | 续命心跳 |
+| `/local-exec/requests` | POST | 提交请求（202 accepted） |
+| `/local-exec/responses` | POST | 轮询 `["id", ...]` → `{responses: [...]}` |
+
+| 常数 | 值 |
+|---|---|
+| `LOCAL_EXEC_HEARTBEAT_MS` | 10 s |
+| `LOCAL_EXEC_LIVENESS_WINDOW_MS` | 30 s（心跳缺席即判死） |
+| `LOCAL_EXEC_RESPONSE_TIMEOUT_MS` | 10 s |
+
+## 14. BCS 多端同步
+
+| 原语 | 语义 |
+|---|---|
+| `get` / `put(id, value, expectedEtag)` | etag 条件写；不匹配返回 `{conflict: true}` |
+| `lock(id, owner, ttl)` / `unlock` | 排他变更锁（60s 默认 TTL，到期自动失效） |
+| merge-on-conflict | 冲突后重读远端、merge、重试条件写；再冲突抛 `BcsConflictError` |

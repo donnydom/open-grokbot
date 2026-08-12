@@ -54,3 +54,19 @@ export {
   startGatewayServer,
   loopbackConnection,
 } from "./sse.js";
+export {
+  type LocalExecRequest,
+  type LocalExecResponse,
+  type LocalExecHandler,
+  type RunningLocalExecDaemon,
+  LOCAL_EXEC_HEARTBEAT_MS,
+  LOCAL_EXEC_LIVENESS_WINDOW_MS,
+  LOCAL_EXEC_RESPONSE_TIMEOUT_MS,
+  LOCAL_EXEC_REQUESTS_PATH,
+  LOCAL_EXEC_RESPONSES_PATH,
+  LOCAL_EXEC_HEARTBEAT_PATH,
+  LocalExecResponseTimeoutError,
+  startLocalExecDaemon,
+  LocalExecClient,
+} from "./local-exec.js";
+

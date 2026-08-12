@@ -51,6 +51,7 @@ export interface AgentStoreOptions {
 }
 
 export const AGENT_LIMIT_MESSAGE = "50 is the maximum";
+export const SAND_DEFAULT_AGENT_NAME = "New Bot";
 export const GROUP_MAX_MEMBERS = 6;
 
 export class AgentStore {

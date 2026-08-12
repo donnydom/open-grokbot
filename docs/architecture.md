@@ -14,38 +14,38 @@ Node the shell is a CLI demo and the coordinator runs as a forked child.
 
 ```mermaid
 flowchart LR
-    subgraph Shell["Desktop shell (Electron main + renderer) / demo CLI"]
+    subgraph Shell["Desktop shell / demo CLI"]
         UI["Renderer / CLI"]
         MAIN["Main process"]
     end
 
-    subgraph Coord["node-agent-coordinator (child process)"]
+    subgraph Coord["node-agent-coordinator child process"]
         C["CoordinatorCore"]
         S1["control session"]
-        S2["data session (renderer)"]
-        S3["mainData session (main)"]
+        S2["data session renderer"]
+        S3["mainData session main"]
         GW["Gateway SSE client"]
         HV["host supervisor"]
     end
 
-    subgraph Host["Host (agent runtime)"]
-        H["orchestration: transcript · scheduler · messaging"]
+    subgraph Host["Host agent runtime"]
+        H["orchestration transcript scheduler messaging"]
     end
 
     subgraph Exec["local-exec-daemon"]
-        E["shell / file ops"]
+        E["shell and file ops"]
     end
 
-    UI -->|MessagePort | S2
-    MAIN -->|MessagePort | S3
-    MAIN -->|MessagePort | S1
+    UI -->|MessagePort| S2
+    MAIN -->|MessagePort| S3
+    MAIN -->|MessagePort| S1
     S1 --- C
     S2 --- C
     S3 --- C
-    C -->|POST /api/&lt;method&gt;| GW
-    GW <-->|GET /events (SSE)| H
-    HV -.->|spawn / restart| Host
-    H <-->|HTTP /local-exec/*| E
+    C -->|HTTP commands| GW
+    GW <-->|SSE event stream| H
+    HV -. supervise .-> Host
+    H <-->|local-exec HTTP| E
 ```
 
 Carriers (mirroring the original's two boot paths):

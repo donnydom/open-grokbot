@@ -46,6 +46,14 @@
 |---|---|---|---|
 | transcript (SQLite + memory mirror) | `packages/state/src/transcript.ts` (JSONL + memory) | persistence round-trip, a2a markers, t<turn>u/s numbering | ✅ |
 | send acceptance ledger (nonce + input digest, survives restart) | `packages/state/src/acceptance-ledger.ts` | dedupe, digest mismatch, restart survival | ✅ |
+| in-flight send merging (synchronous nonce dedupe) | `packages/runner/src/session-runtime.ts` | duplicate nonce merges into one send | ✅ |
+| supersede / epoch bump / prepend recovery | `packages/runner/src/session-runtime.ts` | stale queued turn skips itself, recovery re-enqueue | ✅ |
+| agent-kv (subagent-states registry storage) | `packages/state/src/agent-kv.ts` | namespaced KV persistence round-trip | ✅ |
+| forever-box / teach-recording / workflows stores | `packages/state/src/workspaces.ts` | crud + persistence + recording lifecycle + async task transitions | ✅ |
+| InteractionListener (sendUpdate/query protocol) | `packages/messaging/src/interaction-listener.ts` | update streaming, query answer, unsubscribe | ✅ |
+| agent-isolation workers (store/mirror) | `packages/runner/src/agent-isolation.ts` | in-process handler table, entrypoint contract | ✅ |
+| transcript-hub central interface | `packages/messaging/src/types.ts` (`TranscriptHub`) | wired via SessionRuntime.hub() | ✅ |
+| default agent name | `packages/state/src/agent-store.ts` (`SAND_DEFAULT_AGENT_NAME`) | constant assertion | ✅ |
 | memory | `packages/state/src/memory.ts` | upsert/read | ✅ |
 | automations (schedule) | `packages/state/src/automations.ts` | crud + next-run computation | ✅ |
 | agent store (profile/settings/group, 50 cap, 6-member group) | `packages/state/src/agent-store.ts` | limits, group membership | ✅ |
@@ -82,7 +90,7 @@
 | core | 10 |
 | coordinator | 8 |
 | transport | 12 |
-| state | 10 |
+| state | 15 |
 | messaging | 20 |
-| runner | 5 |
-| **Total** | **65** |
+| runner | 11 |
+| **Total** | **76** |

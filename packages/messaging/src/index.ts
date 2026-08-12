@@ -87,3 +87,11 @@ export {
   createMockCloudBackend,
 } from "./cloud-agent-bridge.js";
 
+export {
+  type InteractionUpdate,
+  type InteractionQuery,
+  type InteractionResponse,
+  type InteractionListener,
+  type InteractionConnection,
+  connectInteractionListener,
+} from "./interaction-listener.js";

@@ -224,7 +224,7 @@ trigger: { type: "schedule", cron: "m h [* * *]" }
 |---|---|---|
 | 0 | 干净退出 | 不重启 |
 | 1 | 协议违约（kill-by-contract） | 不重启 |
-| 2 | 崩溃 | 指数退避重启（1s 基数，30s 上限） |
+| 2 | bootstrap 失败（崩溃） | 指数退避重启（1s 基数，30s 上限） |
 
 ### RPC 方法清单（rpc-contract）
 

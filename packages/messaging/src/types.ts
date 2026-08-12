@@ -87,3 +87,7 @@ export interface MessagingHub {
     trackEvent(name: string, properties: Record<string, unknown>): void;
   };
 }
+
+/** Central hub interface all coordination modules wire into (the original's
+ * transcript-hub). SessionRuntime implements this as its composition root. */
+export type TranscriptHub = MessagingHub;

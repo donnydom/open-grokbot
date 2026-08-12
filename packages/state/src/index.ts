@@ -62,3 +62,17 @@ export {
   createInMemoryBcsBackend,
 } from "./agent-store-sync.js";
 
+export {
+  type AgentKvOptions,
+  AgentKv,
+  SUBAGENT_STATES_NAMESPACE,
+} from "./agent-kv.js";
+export {
+  type ForeverBoxItem,
+  type TeachRecordingSession,
+  type WorkflowRecord,
+  type AsyncTaskRecord,
+  ForeverBoxStore,
+  TeachRecordingStore,
+  WorkflowStore,
+} from "./workspaces.js";

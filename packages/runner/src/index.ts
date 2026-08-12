@@ -13,3 +13,12 @@ export {
   SessionRuntime,
   RuntimeSession,
 } from "./session-runtime.js";
+export {
+  type IsolationJob,
+  type IsolationJobResult,
+  type IsolationHandler,
+  type IsolationWorker,
+  InProcessIsolationWorker,
+  ForkIsolationWorker,
+  runIsolationWorkerEntry,
+} from "./agent-isolation.js";

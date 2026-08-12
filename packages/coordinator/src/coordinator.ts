@@ -11,9 +11,9 @@
  *    `@open-grokbot/transport`. Unknown channels pass through untouched so
  *    protocol evolution never breaks the pipeline.
  * 3. Supervise the host process. Exit-code contract (reconstructed):
- *    0 = clean shutdown, 1 = protocol breach (kill-by-contract), 2 = crash
- *    that warrants a restart attempt. The supervisor restarts on 2 with a
- *    bounded exponential backoff.
+ *    0 = clean shutdown, 1 = protocol breach (kill-by-contract), 2 =
+ *    bootstrap failure (crash) that warrants a restart attempt. The
+ *    supervisor restarts on 2 with a bounded exponential backoff.
  *
  * The coordinator itself is transport-agnostic: carriers (parent-port /
  * fork-ipc) drive the same core, so identical code runs inside a real child

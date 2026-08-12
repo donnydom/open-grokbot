@@ -35,6 +35,16 @@ export class SessionRuntime implements AgentSessionRegistry {
   readonly groupChat = new GroupChatOrchestrator(this.hub());
   private readonly llmFor: (agentId: string) => Llm;
   private readonly onMessage?: (agentId: string, content: string, kind: string) => void;
+  /** In-flight send merging: same clientNonce reuses the pending promise
+   * (the synchronous first line of the original's idempotency chain). */
+  private readonly inFlightSends = new Map<string, Promise<void>>();
+  /** Per-agent user-turn epoch: bumped on every new user message; queued
+   * turns check the epoch before executing (supersede skips stale turns). */
+  private readonly epochs = new Map<string, number>();
+  /** Prepended recovery: user messages skipped by supersede land here and are
+   * re-enqueued once the agent drains (prepend-recovery with break epochs). */
+  private readonly latestRecoverySends = new Map<string, { content: string; timestampMs: number }>();
+  private readonly recoveryBreakEpochs = new Set<string>();
 
   constructor(options: SessionRuntimeOptions) {
     this.agentStore = new AgentStore({ rootDir: options.rootDir, now: options.now });
@@ -162,9 +172,23 @@ export class SessionRuntime implements AgentSessionRegistry {
     return session;
   }
 
-  async sendUserPrompt(agentId: string, prompt: string, options?: { clientNonce?: string }): Promise<void> {
-    const session = await this.getSession(agentId);
+  sendUserPrompt(agentId: string, prompt: string, options?: { clientNonce?: string }): Promise<void> {
     const nonce = options?.clientNonce;
+    // Idempotency first line: merge a duplicate nonce into the in-flight send.
+    if (nonce != null) {
+      const inFlight = this.inFlightSends.get(nonce);
+      if (inFlight != null) return inFlight;
+    }
+    const send = this.doUserPrompt(agentId, prompt, nonce);
+    if (nonce != null) {
+      this.inFlightSends.set(nonce, send);
+      void send.finally(() => this.inFlightSends.delete(nonce));
+    }
+    return send;
+  }
+
+  private async doUserPrompt(agentId: string, prompt: string, nonce?: string): Promise<void> {
+    const session = await this.getSession(agentId);
     const entry: SandTranscriptEntry = {
       kind: "message",
       id: nextEntryId(session.getTranscriptEntries(), "user-message"),
@@ -176,13 +200,57 @@ export class SessionRuntime implements AgentSessionRegistry {
     await session.appendTranscriptEntry(entry);
     const runner = this.runners.get(agentId);
     if (runner == null) return;
+
+    // Supersede: bump the epoch, interrupt an in-flight user turn, and let
+    // queued stale turns skip themselves when they finally run.
+    const epoch = (this.epochs.get(agentId) ?? 0) + 1;
+    this.epochs.set(agentId, epoch);
+    if (this.scheduler.getActiveLane(agentId) === "user") {
+      const interrupted = runner.interrupt("superseded");
+      if (interrupted) {
+        // Prepended recovery: remember the skipped message so it can be
+        // re-enqueued after the queue drains (break-epoch recovery).
+        this.latestRecoverySends.set(agentId, { content: prompt, timestampMs: Date.now() });
+        this.recoveryBreakEpochs.add(agentId);
+      }
+    }
     await this.scheduler.enqueue(
       agentId,
       async () => {
+        // Stale turn (a newer user message superseded us): skip.
+        if (this.epochs.get(agentId) !== epoch) return;
         await runner.run(session, prompt, {});
+        this.recoveryBreakEpochs.delete(agentId);
       },
       { lane: "user", source: "user" },
     );
+  }
+
+  /** Prepended recovery: re-enqueue messages that supersede skipped, once the
+   * agent's queue is drained (mirrors latestRecoverySends semantics). */
+  async recoverSkippedMessages(agentId: string): Promise<number> {
+    const skipped = this.latestRecoverySends.get(agentId);
+    if (skipped == null) return 0;
+    if (this.scheduler.getActiveLane(agentId) != null) return 0; // still busy
+    this.latestRecoverySends.delete(agentId);
+    this.recoveryBreakEpochs.delete(agentId);
+    await this.doUserPrompt(agentId, skipped.content);
+    return 1;
+  }
+
+  /** Diagnostics for the idempotency/supersede machinery. */
+  sendDiagnostics(): {
+    inFlightSends: number;
+    epochs: Record<string, number>;
+    recoveryBreakEpochs: string[];
+    latestRecoverySends: string[];
+  } {
+    return {
+      inFlightSends: this.inFlightSends.size,
+      epochs: Object.fromEntries(this.epochs),
+      recoveryBreakEpochs: [...this.recoveryBreakEpochs],
+      latestRecoverySends: [...this.latestRecoverySends.keys()],
+    };
   }
 
   async runGroupConversation(args: {

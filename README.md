@@ -50,12 +50,12 @@ flowchart TB
         LLM["MockLlm / Llm 接口"]
     end
 
-    UI -->|sendPrompt / broadcast / group| PLANES
+    UI -->|user commands| PLANES
     PLANES --> CARRIER
     CARRIER -->|帧协议| PORT
     PORT -->|命令转发| GATEWAY
     GATEWAY -->|SSE 事件流| SCHED
-    SUPERVISE -.->|监督| HOST
+    SUPERVISE -. supervise .-> HOST
     SCHED --> LIFECYCLE
     SCHED --> MSG
     MSG --> A2A

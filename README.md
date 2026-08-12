@@ -82,6 +82,7 @@ npm install
 npm run build          # 全量构建（tsc 项目引用）
 npm test               # 全量测试（node:test）
 npm run demo           # 运行完整演示：用户对话 + A2A + 群聊 + 广播
+npm run start -w @open-grokbot/console   # 启动浏览器控制面（无 Electron）
 ```
 
 演示输出示例：
@@ -95,6 +96,50 @@ npm run demo           # 运行完整演示：用户对话 + A2A + 群聊 + 广�
   [squad/group] Alpha: good point — @Beta what do you think?
   ...
 ```
+
+## 接入真实 LLM（支持所有模型）
+
+```ts
+import { createLlm, createLlmFromEnv } from "@open-grokbot/llm";
+
+// OpenAI 兼容协议：覆盖 OpenAI / DeepSeek / 豆包 / Moonshot / GLM / Grok /
+// Ollama / vLLM 及一切 OpenAI 兼容端点
+const deepseek = createLlm({
+  provider: "openai-compatible",
+  baseUrl: "https://api.deepseek.com/v1",
+  apiKey: process.env.DEEPSEEK_API_KEY!,
+  model: "deepseek-chat",
+});
+
+// Anthropic 协议
+const claude = createLlm({
+  provider: "anthropic",
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: "claude-sonnet-4-5",
+});
+
+// 环境变量驱动（console 默认路径）
+// LLM_PROVIDER=anthropic  ANTHROPIC_API_KEY=…  ANTHROPIC_MODEL=…
+// 或（默认）OPENAI_API_KEY=…  OPENAI_BASE_URL=…  OPENAI_MODEL=…
+const llm = createLlmFromEnv();
+```
+
+控制台启动后打开 `http://127.0.0.1:<port>` 即可聊天（未配置 key 时回退 MockLlm）。
+
+## 桌面 EXE（不用 Electron）
+
+本项目无 Electron 依赖；浏览器控制面（apps/console）即为 shell。要打成 EXE 有
+以下路径，全部无需 Electron：
+
+| 方案 | 体积 | 形态 | 说明 |
+|---|---|---|---|
+| **Node SEA**（推荐） | ~60-90 MB | 单 EXE，无窗口 | Node 官方 Single Executable Applications，`node --experimental-sea-config` 把 console 打成单 EXE，浏览器访问 |
+| **Bun compile** | ~90 MB | 单 EXE，无窗口 | `bun build --compile` 直接输出 EXE，启动更快 |
+| **Tauri 2** | ~5-10 MB | 原生窗口 | Rust 壳 + 系统 WebView2 加载控制面 UI，Node 后端作 sidecar/HTTP 服务 |
+| **Neutralinojs** | ~2-3 MB | 原生窗口 | 系统 WebView + Node 后端，最轻的带窗口方案 |
+
+> 架构上 shell 与运行时解耦：控制面只通过 HTTP/SSE 说话，所以换任何壳都
+> 不需要改动 packages/* 一行代码。
 
 ## 包结构
 

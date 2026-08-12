@@ -1,0 +1,29 @@
+{
+  "name": "@open-grokbot/console",
+  "version": "0.1.0",
+  "description": "Browser control plane (no Electron): HTTP API + SSE live feed + embedded single-page chat UI over the SessionRuntime.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "bin": {
+    "open-grokbot-console": "./dist/src/index.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "start": "npm run build && node dist/src/index.js"
+  },
+  "dependencies": {
+    "@open-grokbot/llm": "0.1.0",
+    "@open-grokbot/messaging": "0.1.0",
+    "@open-grokbot/runner": "0.1.0",
+    "@open-grokbot/state": "0.1.0"
+  }
+}

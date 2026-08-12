@@ -114,3 +114,21 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     );
   });
 }
+export {
+  type OpenAiCompatibleOptions,
+  type AnthropicOptions,
+  type LlmConfig,
+  DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_ANTHROPIC_BASE_URL,
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_LLM_TIMEOUT_MS,
+  DEFAULT_MAX_RETRIES,
+  RETRY_BASE_DELAY_MS,
+  LlmHttpError,
+  LlmTimeoutError,
+  OpenAiCompatibleLlm,
+  AnthropicLlm,
+  createLlm,
+  createLlmFromEnv,
+} from "./providers.js";

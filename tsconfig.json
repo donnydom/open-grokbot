@@ -8,6 +8,7 @@
     { "path": "packages/coordinator" },
     { "path": "packages/runner" },
     { "path": "packages/llm" },
-    { "path": "apps/demo" }
+    { "path": "apps/demo" },
+    { "path": "apps/console" }
   ]
 }

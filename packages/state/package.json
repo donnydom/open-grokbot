@@ -1,0 +1,24 @@
+{
+  "name": "@open-grokbot/state",
+  "version": "0.1.0",
+  "description": "State layer: transcript store, durable send-acceptance ledger, agent memory, automations and the on-disk agent store.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "npm run build && node --test \"dist/test/*.test.js\""
+  },
+  "dependencies": {
+    "@open-grokbot/core": "0.1.0"
+  }
+}

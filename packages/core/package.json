@@ -1,0 +1,21 @@
+{
+  "name": "@open-grokbot/core",
+  "version": "0.1.0",
+  "description": "Coordination kernel: exclusive run queues with priority lanes, watchdog escape, run lifecycle, policies and event bus.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "npm run build && node --test \"dist/test/*.test.js\""
+  }
+}

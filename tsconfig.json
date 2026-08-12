@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/transport" },
+    { "path": "packages/state" },
+    { "path": "packages/messaging" },
+    { "path": "packages/runner" },
+    { "path": "packages/llm" },
+    { "path": "apps/demo" }
+  ]
+}

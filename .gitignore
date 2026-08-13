@@ -4,3 +4,6 @@ dist/
 .DS_Store
 *.log
 .reasonix/
+
+# runtime agent state (console/demo data dirs)
+.open-grokbot-data/

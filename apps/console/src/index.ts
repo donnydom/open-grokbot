@@ -19,6 +19,7 @@
 import { createServer as createHttpServer } from "node:http";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { MockLlm, createLlmFromEnv } from "@open-grokbot/llm";
 import { AgentToAgentMessaging } from "@open-grokbot/messaging";
@@ -203,9 +204,17 @@ function readJson(req: import("node:http").IncomingMessage): Promise<Record<stri
   });
 }
 
-/** CLI entry: run the console with default seed agents. */
+/** CLI entry: run the console with default seed agents.
+ *
+ * PORT pins the listener (default 0 → ephemeral); OPEN_GROKBOT_DATA_DIR
+ * relocates persisted agent state (default $CWD/.open-grokbot-data).
+ */
 export async function main(): Promise<void> {
+  const envPort = Number.parseInt(process.env.PORT ?? "", 10);
+  const dataDir = process.env.OPEN_GROKBOT_DATA_DIR;
   await startConsole({
+    ...(Number.isInteger(envPort) && envPort >= 0 ? { port: envPort } : {}),
+    ...(dataDir != null && dataDir.length > 0 ? { dataDir } : {}),
     seedAgents: [
       { id: "alpha", name: "Alpha", description: "roadmap planner" },
       { id: "beta", name: "Beta", description: "design lead" },
@@ -215,7 +224,10 @@ export async function main(): Promise<void> {
   });
 }
 
-if (process.argv[1] != null && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
+// pathToFileURL handles POSIX and Windows alike; hand-building `file:///${argv[1]}`
+// yields a four-slash URL on POSIX (file:////home/...) that never matches
+// import.meta.url, so the CLI entry silently no-ops.
+if (process.argv[1] != null && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(error);
     process.exitCode = 1;
